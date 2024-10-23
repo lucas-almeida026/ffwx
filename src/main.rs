@@ -1,10 +1,12 @@
-use std::{collections::HashMap, fmt::format, fs, io::Read, os::unix::raw::mode_t, path::{Display, PathBuf}, vec};
+use std::io::Read;
+use std::{collections::HashMap, fs, io};
+use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand};
 
 const CTX_NL: &str = "🔬";
 const CTX_EOL: &str = "💉";
-const CTX_MID: &str = "⚖️";
+const CTX_MID: &str = "🔭";
 // const CTX_NL: &str = ":";
 // const CTX_EOL: &str = ";";
 // const CTX_MID: &str = "::";
@@ -43,10 +45,6 @@ struct DiffArgs {
     ///Path to the modified file
     #[arg(short)]
     modified_file: String,
-
-    ///Path to output file without extension
-    #[arg(short, default_value = "output")]
-    output_file: String,
 
 	///Revert the diff list before writing to file
 	#[arg(short='R')]
@@ -96,10 +94,10 @@ impl DelimiterGenerator {
 	}
 }
 
-fn get_lines_from_file(path: &PathBuf) -> Result<Vec<String>, std::io::Error> {
+fn get_lines_from_file(path: &PathBuf) -> Result<Vec<String>, io::Error> {
     let mut file = fs::File::open(path)?;
     let mut contents = String::new();
-    file.read_to_string(&mut contents)?;
+	file.read_to_string(&mut contents)?;
     Ok(contents.lines().map(|s| s.to_string()).collect())
 }
 
@@ -270,7 +268,8 @@ fn compute_diff<'a>(source: Vec<String>, modified: Vec<String>, d: &'a Delimiter
     return lines;
 }
 
-fn write_output_file<'a>(path: &PathBuf, lines: Vec<DiffLine>, d: &'a DelimiterGenerator) -> Result<(), std::io::Error> {
+fn write_output<'a, W>(mut w: W, lines: Vec<DiffLine>, d: &'a DelimiterGenerator) -> Result<usize, io::Error>
+where W: io::Write {
     let mut buffer = String::new();
     for line in lines {
 		let h = line.kind.to_header();
@@ -293,7 +292,7 @@ fn write_output_file<'a>(path: &PathBuf, lines: Vec<DiffLine>, d: &'a DelimiterG
 		}
         
     }
-    fs::write(path, buffer)
+	w.write(buffer.as_bytes())
 }
 
 fn main() {
@@ -303,7 +302,6 @@ fn main() {
         Command::Diff(args) => {
             let source = PathBuf::from(&args.source_file);
             let modified = PathBuf::from(&args.modified_file);
-            let output = PathBuf::from(format!("{}.ffwx", &args.output_file));
 
             let slines = get_lines_from_file(&source);
             let mlines = get_lines_from_file(&modified);
@@ -325,10 +323,10 @@ fn main() {
 				diff.reverse();
 			}
 
-            match write_output_file(&output, diff, &delimiter_gen) {
-                Err(e) => eprintln!("Error writing output file: {}", e),
-                Ok(()) => println!("{}", fs::canonicalize(output).unwrap().display()),
-            }
+            match write_output(std::io::stdout(), diff, &delimiter_gen) {
+				Err(e) => eprintln!("Error writing output: {}", e),
+				_ => (),
+			}
         }
         Command::Rebuild(args) => todo!("Rebuild"),
     }
