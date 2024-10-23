@@ -136,8 +136,12 @@ impl<'a> LineCtx<'a> {
 
 	fn push(&mut self, v: &Vec<String>, i: usize, amount: usize) {
 		for j in 0..amount {
-			let before = v.get(i - j - 2);
-            let after = v.get(i + j);
+			let before = if i >= j + 1 { v.get(i - j - 1) } else { None };
+            let after = if i + j + 1 < v.len() {
+                v.get(i + j + 1)
+            } else {
+                None
+            };
 			match (before, after) {
                 (Some(b), Some(a)) => {
                     self.before.push(b.clone());
@@ -233,15 +237,16 @@ fn compute_diff<'a>(source: Vec<String>, modified: Vec<String>, d: &'a Delimiter
             //TODO: compare context to determine if line was modified or deleted
 			
             let mut line = DiffLine::new(DiffKind::Added, modified[j - 1].clone(), d);
-            line.ctx.push(&modified, j, 1);
+			println!("i: {i}, j: {j}, s: {}, m: {}", source[i], modified[j - 1]);
+            line.ctx.push(&source, i, 1);
 			
-			for (x, l) in lines.iter().enumerate() {
-				if l.ctx.compare(&line.ctx) {
-					line.kind = DiffKind::Modified;
-					lines.remove(x);
-					break;
-				}
-			}
+			// for (x, l) in lines.iter().enumerate() {
+			// 	if l.ctx.compare(&line.ctx) {
+			// 		line.kind = DiffKind::Modified;
+			// 		lines.remove(x);
+			// 		break;
+			// 	}
+			// }
 
             lines.push(line);
             j -= 1;
@@ -257,7 +262,7 @@ fn compute_diff<'a>(source: Vec<String>, modified: Vec<String>, d: &'a Delimiter
 
     while j > 0 {
         let mut line = DiffLine::new(DiffKind::Added, modified[j - 1].clone(), d);
-        line.ctx.push(&modified, j, 1);
+        line.ctx.push(&source, i, 1);
         lines.push(line);
         j -= 1;
     }
@@ -331,5 +336,58 @@ fn main() {
 /*
 TODO: list
 
-- strip in between context lines when lines are in sequence
+- strip in between context lines when lines are in sequence; if before ctx of current line is equal to the line before this one, then this line is a sequence of the previous line
 */
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn gen_lines(s: &str) -> Vec<String> {
+        s.split(',').map(|x| x.to_string()).collect()
+    }
+
+    #[test]
+    fn middle_context_of_1() {
+        let lines = gen_lines("a,c,c,d");
+
+        let d = DelimiterGenerator::new(true);
+        let mut l1 = DiffLine::new(DiffKind::Modified, "b".to_string(), &d);
+        l1.ctx.push(&lines, 1, 1);
+        assert_eq!(l1.ctx.before.len(), 1);
+        assert_eq!(l1.ctx.before.get(0), Some(&"a".to_string()));
+        assert_eq!(l1.ctx.after.len(), 1);
+        assert_eq!(l1.ctx.after.get(0), Some(&"c".to_string()));
+    }
+
+    #[test]
+    fn head_context_of_1() {
+        let lines = gen_lines("a,c,c,d");
+
+        let d = DelimiterGenerator::new(true);
+        let mut l1 = DiffLine::new(DiffKind::Modified, "b".to_string(), &d);
+        l1.ctx.push(&lines, 0, 1);
+        assert_eq!(l1.ctx.before.len(), 0);
+        assert_eq!(l1.ctx.before.get(0), None);
+        assert_eq!(l1.ctx.after.len(), 1);
+        assert_eq!(l1.ctx.after.get(0), Some(&"c".to_string()));
+    }
+
+    #[test]
+    fn tails_context_of_1() {
+        let lines = gen_lines("a,c,c,d");
+
+        let d = DelimiterGenerator::new(true);
+        let mut l1 = DiffLine::new(DiffKind::Modified, "b".to_string(), &d);
+        l1.ctx.push(&lines, 3, 1);
+        assert_eq!(l1.ctx.before.len(), 1);
+        assert_eq!(l1.ctx.before.get(0), Some(&"c".to_string()));
+        assert_eq!(l1.ctx.after.len(), 0);
+        assert_eq!(l1.ctx.after.get(0), None);
+    }
+
+    #[test]
+    fn should_trim_contigous_ctx_lines() {
+        assert_eq!(true, true);
+    }
+}
