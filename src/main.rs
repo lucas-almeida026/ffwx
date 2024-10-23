@@ -31,9 +31,9 @@ enum Command {
     #[command(name = "diff", alias = "df")]
     Diff(DiffArgs),
 
-    /// Rebuilds the modified file using the ffwx and source file
-    #[command(name = "rb")]
-    Rebuild(RebuildArgs),
+    /// Apply ffwx diffs to a source file; note that the diff file can not be in human readable format to be applied
+    #[command(name = "apply", alias = "ap")]
+    Apply(ApplyArgs),
 }
 
 #[derive(Debug, Args)]
@@ -56,18 +56,14 @@ struct DiffArgs {
 }
 
 #[derive(Debug, Args)]
-struct RebuildArgs {
-    ///Path to the source file
-    #[arg(short)]
-    source_file: String,
-
+struct ApplyArgs {
     ///Path to the diff file
     #[arg(short)]
     ffwx_file: String,
 
-    ///Path to output file
+    ///Path to the source file
     #[arg(short)]
-    output_file: String,
+    source_file: String,
 }
 
 #[derive(Debug, Clone)]
@@ -328,6 +324,12 @@ fn main() {
 				_ => (),
 			}
         }
-        Command::Rebuild(args) => todo!("Rebuild"),
+        Command::Apply(args) => todo!("Apply"),
     }
 }
+
+/*
+TODO: list
+
+- strip in between context lines when lines are in sequence
+*/
