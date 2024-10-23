@@ -1,6 +1,6 @@
 use std::io::Read;
-use std::{collections::HashMap, fs, io};
 use std::path::PathBuf;
+use std::{collections::HashMap, fs, io};
 
 use clap::{Args, Parser, Subcommand};
 
@@ -46,13 +46,13 @@ struct DiffArgs {
     #[arg(short)]
     modified_file: String,
 
-	///Revert the diff list before writing to file
-	#[arg(short='R')]
-	revert: bool,
+    ///Revert the diff list before writing to file
+    #[arg(short = 'R')]
+    revert: bool,
 
-	///Write context lines separately
-	#[arg(short='H')]
-	human_readable: bool,
+    ///Write context lines separately
+    #[arg(short = 'H')]
+    human_readable: bool,
 }
 
 #[derive(Debug, Args)]
@@ -69,7 +69,7 @@ struct ApplyArgs {
 fn get_lines_from_file(path: &PathBuf) -> Result<Vec<String>, io::Error> {
     let mut file = fs::File::open(path)?;
     let mut contents = String::new();
-	file.read_to_string(&mut contents)?;
+    file.read_to_string(&mut contents)?;
     Ok(contents.lines().map(|s| s.to_string()).collect())
 }
 
@@ -97,26 +97,26 @@ enum CtxKind {
 
 #[derive(Debug, Clone)]
 struct LineCtx {
-	before: Vec<String>,
-	after: Vec<String>,
+    before: Vec<String>,
+    after: Vec<String>,
 }
 impl LineCtx {
-	fn new() -> Self {
-		Self {
-			before: Vec::new(),
-			after: Vec::new(),
-		}
-	}
+    fn new() -> Self {
+        Self {
+            before: Vec::new(),
+            after: Vec::new(),
+        }
+    }
 
-	fn push(&mut self, v: &Vec<String>, i: usize, amount: usize) {
-		for j in 0..amount {
-			let before = if i >= j + 1 { v.get(i - j - 1) } else { None };
+    fn push(&mut self, v: &Vec<String>, i: usize, amount: usize) {
+        for j in 0..amount {
+            let before = if i >= j + 1 { v.get(i - j - 1) } else { None };
             let after = if i + j + 1 < v.len() {
                 v.get(i + j + 1)
             } else {
                 None
             };
-			match (before, after) {
+            match (before, after) {
                 (Some(b), Some(a)) => {
                     self.before.push(b.clone());
                     self.after.push(a.clone());
@@ -129,33 +129,33 @@ impl LineCtx {
                 }
                 _ => continue,
             }
-		}
-	}
+        }
+    }
 
-	fn compare(&self, other: &LineCtx) -> bool {
-		if self.after.len() != other.after.len()
-            || self.before.len() != other.before.len()
-        {
+    fn compare(&self, other: &LineCtx) -> bool {
+        if self.after.len() != other.after.len() || self.before.len() != other.before.len() {
             return false;
         }
 
-		for i in 0..self.after.len() {
-			let (a, b) = (&self.after[i], &other.after[i]);
-			if a.len() != b.len() || a != b {
-				return false;
-			}
-		}
+        for i in 0..self.after.len() {
+            let (a, b) = (&self.after[i], &other.after[i]);
+            if a.len() != b.len() || a != b {
+                return false;
+            }
+        }
 
         return true;
-	}
+    }
 
-	fn before_str(&self) -> String {
-		format!("{}{}", self.before.join(CTX_NL), self.before.is_empty() ? "" : CTX_NL)
-	}
+    fn before_str(&self) -> String {
+        let end = if self.before.is_empty() { "" } else { CTX_NL };
+        format!("{}{}", self.before.join(CTX_NL), end)
+    }
 
-	fn after_str(&self) -> String {
-		format!("{}{}", CTX_NL, self.after.join(CTX_NL))
-	}
+    fn after_str(&self) -> String {
+        let start = if self.before.is_empty() { "" } else { CTX_NL };
+        format!("{}{}", start, self.after.join(CTX_NL))
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -173,70 +173,147 @@ impl DiffLine {
         }
     }
 
-	fn added(value: String) -> Self {
-		DiffLine::new(DiffKind::Added, value)
-	}
+    fn added(value: String) -> Self {
+        DiffLine::new(DiffKind::Added, value)
+    }
 
-	fn removed(value: String) -> Self {
-		DiffLine::new(DiffKind::Removed, value)
-	}
+    fn removed(value: String) -> Self {
+        DiffLine::new(DiffKind::Removed, value)
+    }
 
-	fn changed(value: String) -> Self {
-		DiffLine::new(DiffKind::Changed, value)
-	}
+    fn changed(value: String) -> Self {
+        DiffLine::new(DiffKind::Changed, value)
+    }
 }
 
 fn compute_diff(source: Vec<String>, modified: Vec<String>) -> Vec<DiffLine> {
     let mut lines: Vec<DiffLine> = Vec::new();
+    /*
+    if lines are equal skip
+    else cross compare the current line of each file until find a match
+        while doing so collect all lines in separate buffers (one for each file)
+        stop after finding a match or hit end of both files
+    at the end if both buffers have the same number of lines
+    then all lines on the modified buffer are "changed"
+    else if match was found on the source file then lines are "removed" and if match was found on the modified file then lines are "added"
+    */
 
-	let mut i: usize = 0;
-	let mut j: usize = 0;
+    let mut i: usize = 0;
+    let mut j: usize = 0;
 
-	loop {
-		if i >= source.len() && j >= modified.len() {
-			println!("end of both files");
-			break;
-		}
-		let (sline, mline) = (
-			source.get(i),
-			modified.get(j),
-		);
-		match (sline, mline) {
-			(Some(s), Some(m)) => {
-				println!("s = {s}, m = {m}");
-			},
-			(None, Some(m)) => {
-				let line = DiffLine::added(m.to_string());
-				lines.push(line);
-			},
-			(Some(s), None) => {
-				let line = DiffLine::removed(s.to_string());
-				lines.push(line);
-			},
-			(None, None) => {},
-		}
-		i += 1;
-		j += 1;
-	}
+    loop {
+        if i >= source.len() && j >= modified.len() {
+            break;
+        }
+        let (sline, mline) = (source.get(i), modified.get(j));
+        match (sline, mline) {
+            (Some(s), Some(m)) => {
+                if s == m {
+                    i += 1;
+                    j += 1;
+                    continue;
+                }
+                let mut src_buf: Vec<String> = vec![s.clone()];
+                let mut mod_buf: Vec<String> = vec![m.clone()];
+
+                let mut x: usize = 1;
+                let mut y: usize = 1;
+
+                loop {
+                    let ns = source.get(i + x);
+                    let nm = modified.get(j + y);
+
+                    match (ns, nm) {
+                        (Some(ns), Some(nm)) => {
+							if ns == nm {
+								break;
+							} else {
+								src_buf.push(ns.clone());
+								mod_buf.push(nm.clone());
+							}
+							if m == ns {
+								src_buf.pop();
+								mod_buf.pop();
+								mod_buf.pop();
+                                break;
+                            }
+							if s == nm {
+								src_buf.pop();
+								src_buf.pop();
+								mod_buf.pop();
+                                break;
+                            }
+                        }
+                        (Some(ns), None) => {
+                            if m == ns {
+                                break;
+                            }
+                            src_buf.push(ns.clone());
+                        }
+                        (None, Some(nm)) => {
+                            if s == nm {
+                                break;
+                            }
+                            mod_buf.push(nm.clone());
+                        }
+                        (None, None) => break,
+                    }
+
+                    x += 1;
+                    y += 1;
+                }
+                if mod_buf.len() == src_buf.len() && !mod_buf.is_empty() {
+                    for str in mod_buf {
+                        let line = DiffLine::changed(str);
+                        lines.push(line);
+                    }
+                } else {
+                    if mod_buf.len() > src_buf.len() {
+						j += mod_buf.len();
+                        for str in mod_buf {
+                            lines.push(DiffLine::added(str));
+                        }
+                    } else {
+						i += src_buf.len();
+                        for str in src_buf {
+                            lines.push(DiffLine::removed(str));
+                        }
+                    }
+                }
+            }
+            (None, Some(m)) => {
+                let line = DiffLine::added(m.to_string());
+                lines.push(line);
+            }
+            (Some(s), None) => {
+                let line = DiffLine::removed(s.to_string());
+                lines.push(line);
+            }
+            (None, None) => {}
+        }
+        i += 1;
+        j += 1;
+    }
 
     return lines;
 }
 
 fn write_output<'a, W>(mut w: W, lines: Vec<DiffLine>) -> Result<usize, io::Error>
-where W: io::Write {
+where
+    W: io::Write,
+{
     let mut buffer = String::new();
     for line in lines {
-		let h = line.kind.to_header();
+        let h = line.kind.to_header();
         buffer.push_str(&line.ctx.before_str());
         // buffer.push_str(CTX_NL);
         buffer.push_str(&h);
         buffer.push_str(&line.value);
         // buffer.push_str(CTX_NL);
-		buffer.push_str(&line.ctx.after_str());
-		buffer.push('\n');
-        
+        buffer.push_str(&line.ctx.after_str());
+        buffer.push('\n');
     }
-	w.write(buffer.as_bytes())
+    w.write(buffer.as_bytes())
 }
 
 fn main() {
@@ -260,15 +337,14 @@ fn main() {
             let slines = slines.unwrap();
             let mlines = mlines.unwrap();
 
-            let mut diff = compute_diff(slines, mlines);
-			if args.revert {
-				diff.reverse();
-			}
+            let diff = compute_diff(slines, mlines);
 
-            match write_output(std::io::stdout(), diff) {
-				Err(e) => eprintln!("Error writing output: {}", e),
-				_ => (),
-			}
+            println!("\ndiff: {:#?}", diff);
+            let file = fs::File::create("./out.ffwx");
+            match write_output(file.expect("Error creating output file"), diff) {
+                Err(e) => eprintln!("Error writing output: {}", e),
+                _ => (),
+            }
         }
         Command::Apply(args) => todo!("Apply"),
     }
