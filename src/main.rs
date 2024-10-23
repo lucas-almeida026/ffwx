@@ -4,12 +4,12 @@ use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand};
 
-const CTX_NL: &str = "🔬";
-const CTX_EOL: &str = "💉";
-const CTX_MID: &str = "🔭";
-// const CTX_NL: &str = ":";
-// const CTX_EOL: &str = ";";
-// const CTX_MID: &str = "::";
+// const CTX_NL: &str = "🔬";
+// const CTX_EOL: &str = "💉";
+// const CTX_MID: &str = "🔭";
+const CTX_NL: &str = "\n";
+const CTX_EOL: &str = "\n";
+const CTX_MID: &str = "\n";
 
 #[derive(Debug, Parser)]
 #[command(name = "ffwx")]
@@ -66,30 +66,6 @@ struct ApplyArgs {
     source_file: String,
 }
 
-#[derive(Debug, Clone)]
-struct DelimiterGenerator {
-	readable: bool,
-}
-impl DelimiterGenerator {
-	fn new(readable: bool) -> Self {
-		Self {
-			readable,
-		}
-	}
-
-	fn new_line(&self) -> &str {
-		if self.readable {"\n"} else {CTX_NL}
-	}
-
-	fn end_of_line(&self) -> &str {
-		if self.readable {""} else {CTX_EOL}
-	}
-
-	fn halfway(&self) -> &str {
-		if self.readable {"\n"} else {CTX_MID}
-	}
-}
-
 fn get_lines_from_file(path: &PathBuf) -> Result<Vec<String>, io::Error> {
     let mut file = fs::File::open(path)?;
     let mut contents = String::new();
@@ -101,14 +77,14 @@ fn get_lines_from_file(path: &PathBuf) -> Result<Vec<String>, io::Error> {
 enum DiffKind {
     Added,
     Removed,
-    Modified,
+    Changed,
 }
 impl DiffKind {
     fn to_header(&self) -> String {
         match self {
             DiffKind::Added => "+ ".to_string(),
             DiffKind::Removed => "- ".to_string(),
-            DiffKind::Modified => "~ ".to_string(),
+            DiffKind::Changed => "~ ".to_string(),
         }
     }
 }
@@ -120,15 +96,13 @@ enum CtxKind {
 }
 
 #[derive(Debug, Clone)]
-struct LineCtx<'a> {
-	d: &'a DelimiterGenerator,
+struct LineCtx {
 	before: Vec<String>,
 	after: Vec<String>,
 }
-impl<'a> LineCtx<'a> {
-	fn new(d: &'a DelimiterGenerator) -> Self {
+impl LineCtx {
+	fn new() -> Self {
 		Self {
-			d,
 			before: Vec::new(),
 			after: Vec::new(),
 		}
@@ -176,121 +150,90 @@ impl<'a> LineCtx<'a> {
 	}
 
 	fn before_str(&self) -> String {
-		self.before.join(self.d.new_line())
+		format!("{}{}", self.before.join(CTX_NL), self.before.is_empty() ? "" : CTX_NL)
 	}
 
 	fn after_str(&self) -> String {
-		self.after.join(self.d.new_line())
+		format!("{}{}", CTX_NL, self.after.join(CTX_NL))
 	}
 }
 
 #[derive(Debug, Clone)]
-struct DiffLine<'a> {
+struct DiffLine {
     kind: DiffKind,
     value: String,
-    ctx: LineCtx<'a>,
+    ctx: LineCtx,
 }
-impl<'a> DiffLine<'a> {
-    fn new(kind: DiffKind, value: String, d: &'a DelimiterGenerator) -> Self {
+impl DiffLine {
+    fn new(kind: DiffKind, value: String) -> Self {
         Self {
             kind,
             value,
-            ctx: LineCtx::new(d),
+            ctx: LineCtx::new(),
         }
     }
+
+	fn added(value: String) -> Self {
+		DiffLine::new(DiffKind::Added, value)
+	}
+
+	fn removed(value: String) -> Self {
+		DiffLine::new(DiffKind::Removed, value)
+	}
+
+	fn changed(value: String) -> Self {
+		DiffLine::new(DiffKind::Changed, value)
+	}
 }
 
-fn compute_diff<'a>(source: Vec<String>, modified: Vec<String>, d: &'a DelimiterGenerator) -> Vec<DiffLine<'a>> {
+fn compute_diff(source: Vec<String>, modified: Vec<String>) -> Vec<DiffLine> {
     let mut lines: Vec<DiffLine> = Vec::new();
 
-    let mut modified_map: HashMap<&str, Vec<usize>> = HashMap::new();
-    for (i, line) in modified.iter().enumerate() {
-        modified_map.entry(line).or_insert_with(Vec::new).push(i);
-    }
+	let mut i: usize = 0;
+	let mut j: usize = 0;
 
-    let mut lcs: Vec<Vec<usize>> = vec![vec![0; modified.len() + 1]; source.len() + 1];
+	loop {
+		if i >= source.len() && j >= modified.len() {
+			println!("end of both files");
+			break;
+		}
+		let (sline, mline) = (
+			source.get(i),
+			modified.get(j),
+		);
+		match (sline, mline) {
+			(Some(s), Some(m)) => {
+				println!("s = {s}, m = {m}");
+			},
+			(None, Some(m)) => {
+				let line = DiffLine::added(m.to_string());
+				lines.push(line);
+			},
+			(Some(s), None) => {
+				let line = DiffLine::removed(s.to_string());
+				lines.push(line);
+			},
+			(None, None) => {},
+		}
+		i += 1;
+		j += 1;
+	}
 
-    for i in 1..=source.len() {
-        for j in 1..=modified.len() {
-            if source[i - 1] == modified[j - 1] {
-                lcs[i][j] = lcs[i - 1][j - 1] + 1;
-            } else {
-                lcs[i][j] = lcs[i - 1][j].max(lcs[i][j - 1]);
-            }
-        }
-    }
-
-    let mut i = source.len();
-    let mut j = modified.len();
-    while i > 0 && j > 0 {
-        if source[i - 1] == modified[j - 1] {
-            i -= 1;
-            j -= 1;
-        } else if lcs[i][j] == lcs[i - 1][j] {
-            let mut line = DiffLine::new(DiffKind::Removed, source[i - 1].clone(), d);
-            line.ctx.push(&source, i, 1);
-            lines.push(line);
-            i -= 1;
-        } else {
-            // println!("s: {}, m: {}", source[i - 1], modified[j - 1]);
-
-            //TODO: compare context to determine if line was modified or deleted
-			
-            let mut line = DiffLine::new(DiffKind::Added, modified[j - 1].clone(), d);
-			println!("i: {i}, j: {j}, s: {}, m: {}", source[i], modified[j - 1]);
-            line.ctx.push(&source, i, 1);
-			
-			// for (x, l) in lines.iter().enumerate() {
-			// 	if l.ctx.compare(&line.ctx) {
-			// 		line.kind = DiffKind::Modified;
-			// 		lines.remove(x);
-			// 		break;
-			// 	}
-			// }
-
-            lines.push(line);
-            j -= 1;
-        }
-    }
-
-    while i > 0 {
-        let mut line = DiffLine::new(DiffKind::Removed, source[i - 1].clone(), d);
-        line.ctx.push(&source, i, 1);
-        lines.push(line);
-        i -= 1;
-    }
-
-    while j > 0 {
-        let mut line = DiffLine::new(DiffKind::Added, modified[j - 1].clone(), d);
-        line.ctx.push(&source, i, 1);
-        lines.push(line);
-        j -= 1;
-    }
     return lines;
 }
 
-fn write_output<'a, W>(mut w: W, lines: Vec<DiffLine>, d: &'a DelimiterGenerator) -> Result<usize, io::Error>
+fn write_output<'a, W>(mut w: W, lines: Vec<DiffLine>) -> Result<usize, io::Error>
 where W: io::Write {
     let mut buffer = String::new();
     for line in lines {
 		let h = line.kind.to_header();
-        if d.readable {
-			buffer.push_str(&line.ctx.before_str());
-	        buffer.push_str(d.new_line());
-	        buffer.push_str(&h);
-	        buffer.push_str(&line.value);
-	        buffer.push_str(d.new_line());
-			buffer.push_str(&line.ctx.after_str());
-			buffer.push('\n');
-		} else {
-			buffer.push_str(&h);
-	        buffer.push_str(&line.value);
-	        buffer.push_str(d.end_of_line());
-			buffer.push_str(&line.ctx.before_str());
-	        buffer.push_str(d.halfway());
-			buffer.push_str(&line.ctx.after_str());
-			buffer.push('\n');
-		}
+        buffer.push_str(&line.ctx.before_str());
+        // buffer.push_str(CTX_NL);
+        buffer.push_str(&h);
+        buffer.push_str(&line.value);
+        // buffer.push_str(CTX_NL);
+		buffer.push_str(&line.ctx.after_str());
+		buffer.push('\n');
         
     }
 	w.write(buffer.as_bytes())
@@ -317,14 +260,12 @@ fn main() {
             let slines = slines.unwrap();
             let mlines = mlines.unwrap();
 
-			let delimiter_gen = DelimiterGenerator::new(args.human_readable);
-
-            let mut diff = compute_diff(slines, mlines, &delimiter_gen);
+            let mut diff = compute_diff(slines, mlines);
 			if args.revert {
 				diff.reverse();
 			}
 
-            match write_output(std::io::stdout(), diff, &delimiter_gen) {
+            match write_output(std::io::stdout(), diff) {
 				Err(e) => eprintln!("Error writing output: {}", e),
 				_ => (),
 			}
@@ -351,8 +292,7 @@ mod tests {
     fn middle_context_of_1() {
         let lines = gen_lines("a,c,c,d");
 
-        let d = DelimiterGenerator::new(true);
-        let mut l1 = DiffLine::new(DiffKind::Modified, "b".to_string(), &d);
+        let mut l1 = DiffLine::new(DiffKind::Changed, "b".to_string());
         l1.ctx.push(&lines, 1, 1);
         assert_eq!(l1.ctx.before.len(), 1);
         assert_eq!(l1.ctx.before.get(0), Some(&"a".to_string()));
@@ -364,8 +304,7 @@ mod tests {
     fn head_context_of_1() {
         let lines = gen_lines("a,c,c,d");
 
-        let d = DelimiterGenerator::new(true);
-        let mut l1 = DiffLine::new(DiffKind::Modified, "b".to_string(), &d);
+        let mut l1 = DiffLine::new(DiffKind::Changed, "b".to_string());
         l1.ctx.push(&lines, 0, 1);
         assert_eq!(l1.ctx.before.len(), 0);
         assert_eq!(l1.ctx.before.get(0), None);
@@ -377,8 +316,7 @@ mod tests {
     fn tails_context_of_1() {
         let lines = gen_lines("a,c,c,d");
 
-        let d = DelimiterGenerator::new(true);
-        let mut l1 = DiffLine::new(DiffKind::Modified, "b".to_string(), &d);
+        let mut l1 = DiffLine::new(DiffKind::Changed, "b".to_string());
         l1.ctx.push(&lines, 3, 1);
         assert_eq!(l1.ctx.before.len(), 1);
         assert_eq!(l1.ctx.before.get(0), Some(&"c".to_string()));
