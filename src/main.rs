@@ -357,51 +357,128 @@ TODO: list
 */
 
 #[cfg(test)]
-mod tests {
+mod test {
     use super::*;
 
     fn gen_lines(s: &str) -> Vec<String> {
         s.split(',').map(|x| x.to_string()).collect()
     }
+	#[cfg(test)]
+	mod line_context {
+		use super::*;
+		#[test]
+		fn middle_context_of_1() {
+			let lines = gen_lines("a,c,c,d");
+	
+			let mut l1 = DiffLine::new(DiffKind::Changed, "b".to_string());
+			l1.ctx.push(&lines, 1, 1);
+			assert_eq!(l1.ctx.before.len(), 1);
+			assert_eq!(l1.ctx.before.get(0), Some(&"a".to_string()));
+			assert_eq!(l1.ctx.after.len(), 1);
+			assert_eq!(l1.ctx.after.get(0), Some(&"c".to_string()));
+		}
+	
+		#[test]
+		fn head_context_of_1() {
+			let lines = gen_lines("a,c,c,d");
+	
+			let mut l1 = DiffLine::new(DiffKind::Changed, "b".to_string());
+			l1.ctx.push(&lines, 0, 1);
+			assert_eq!(l1.ctx.before.len(), 0);
+			assert_eq!(l1.ctx.before.get(0), None);
+			assert_eq!(l1.ctx.after.len(), 1);
+			assert_eq!(l1.ctx.after.get(0), Some(&"c".to_string()));
+		}
+	
+		#[test]
+		fn tails_context_of_1() {
+			let lines = gen_lines("a,c,c,d");
+	
+			let mut l1 = DiffLine::new(DiffKind::Changed, "b".to_string());
+			l1.ctx.push(&lines, 3, 1);
+			assert_eq!(l1.ctx.before.len(), 1);
+			assert_eq!(l1.ctx.before.get(0), Some(&"c".to_string()));
+			assert_eq!(l1.ctx.after.len(), 0);
+			assert_eq!(l1.ctx.after.get(0), None);
+		}
+	
+	}
+	
+	#[cfg(test)]
+	mod diff {
+		use core::str;
+		use io::BufWriter;
+		use super::*;
 
-    #[test]
-    fn middle_context_of_1() {
-        let lines = gen_lines("a,c,c,d");
+		#[test]
+		fn single_add_at_start() {
+			let slines = vec![
+				"const x {",
+				"\ta: 1,",
+				"}",
+			].iter().map(|x|x.to_string()).collect();
+			let mlines = vec![
+				"console.log(42)",
+				"console.log(69)",
+				"const x {",
+				"\ta: 1,",
+				"}",
+			].iter().map(|x|x.to_string()).collect();
 
-        let mut l1 = DiffLine::new(DiffKind::Changed, "b".to_string());
-        l1.ctx.push(&lines, 1, 1);
-        assert_eq!(l1.ctx.before.len(), 1);
-        assert_eq!(l1.ctx.before.get(0), Some(&"a".to_string()));
-        assert_eq!(l1.ctx.after.len(), 1);
-        assert_eq!(l1.ctx.after.get(0), Some(&"c".to_string()));
-    }
+			let diff = compute_diff(slines, mlines);
+			let mut writer = BufWriter::new(Vec::new());
+			let r = write_output(&mut writer, diff);
+			let out = str::from_utf8(writer.buffer());
+			assert!(r.is_ok());
+			assert!(out.is_ok());
+			assert_eq!(out.unwrap(), "+ console.log(42)\n+ console.log(69)\n");
+		}
 
-    #[test]
-    fn head_context_of_1() {
-        let lines = gen_lines("a,c,c,d");
+		#[test]
+		fn single_add_at_middle() {
+			let slines = vec![
+				"const x {",
+				"\ta: 1,",
+				"}",
+			].iter().map(|x|x.to_string()).collect();
+			let mlines = vec![
+				"const x {",
+				"\ta: 1,",
+				"\tb: 2,",
+				"}",
+			].iter().map(|x|x.to_string()).collect();
 
-        let mut l1 = DiffLine::new(DiffKind::Changed, "b".to_string());
-        l1.ctx.push(&lines, 0, 1);
-        assert_eq!(l1.ctx.before.len(), 0);
-        assert_eq!(l1.ctx.before.get(0), None);
-        assert_eq!(l1.ctx.after.len(), 1);
-        assert_eq!(l1.ctx.after.get(0), Some(&"c".to_string()));
-    }
+			let diff = compute_diff(slines, mlines);
+			let mut writer = BufWriter::new(Vec::new());
+			let r = write_output(&mut writer, diff);
+			let out = str::from_utf8(writer.buffer());
+			assert!(r.is_ok());
+			assert!(out.is_ok());
+			assert_eq!(out.unwrap(), "+ b: 2\n");
+		}
 
-    #[test]
-    fn tails_context_of_1() {
-        let lines = gen_lines("a,c,c,d");
+		#[test]
+		fn single_add_at_bottom() {
+			let slines = vec![
+				"const x {",
+				"\ta: 1,",
+				"}",
+			].iter().map(|x|x.to_string()).collect();
+			let mlines = vec![
+				"const x {",
+				"\ta: 1,",
+				"}",
+				"console.log(69)",
+				"console.log(42)",
+			].iter().map(|x|x.to_string()).collect();
 
-        let mut l1 = DiffLine::new(DiffKind::Changed, "b".to_string());
-        l1.ctx.push(&lines, 3, 1);
-        assert_eq!(l1.ctx.before.len(), 1);
-        assert_eq!(l1.ctx.before.get(0), Some(&"c".to_string()));
-        assert_eq!(l1.ctx.after.len(), 0);
-        assert_eq!(l1.ctx.after.get(0), None);
-    }
-
-    #[test]
-    fn should_trim_contigous_ctx_lines() {
-        assert_eq!(true, true);
-    }
+			let diff = compute_diff(slines, mlines);
+			let mut writer = BufWriter::new(Vec::new());
+			let r = write_output(&mut writer, diff);
+			let out = str::from_utf8(writer.buffer());
+			assert!(r.is_ok());
+			assert!(out.is_ok());
+			assert_eq!(out.unwrap(), "+ console.log(69)\n+ console.log(42)\n");
+		}
+	}
 }
